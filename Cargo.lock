@@ -66,6 +66,7 @@ version = "0.1.0"
 dependencies = [
  "atiny-checker",
  "atiny-error",
+ "atiny-ir",
  "atiny-location",
  "atiny-parser",
  "atiny-tree",
@@ -89,6 +90,10 @@ version = "0.1.0"
 dependencies = [
  "atiny-location",
 ]
+
+[[package]]
+name = "atiny-ir"
+version = "0.1.0"
 
 [[package]]
 name = "atiny-location"
