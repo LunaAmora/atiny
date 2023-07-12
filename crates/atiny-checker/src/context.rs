@@ -4,9 +4,12 @@
 use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 use atiny_error::{Error, Message, SugestionKind};
-use atiny_location::ByteRange;
+use atiny_location::{ByteRange, Located};
+use atiny_parser::io::NodeId;
 use atiny_tree::r#abstract::TypeDecl;
 use itertools::Itertools;
+
+use crate::{infer::Infer, program::Program};
 
 use super::types::*;
 
@@ -24,8 +27,18 @@ impl Display for Signatures {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum Imports {
+    Star,
+    Module,
+    Items(Vec<String>),
+}
+
 #[derive(Clone)]
 pub struct Ctx {
+    pub id: NodeId,
+    pub program: Program,
+    pub imports: Rc<RefCell<im_rc::HashMap<NodeId, Imports>>>,
     counter: Rc<RefCell<usize>>,
     pub errors: Rc<RefCell<Vec<Error>>>,
     pub map: im_rc::OrdMap<String, Rc<TypeScheme>>,
@@ -35,9 +48,12 @@ pub struct Ctx {
     pub signatures: Signatures,
 }
 
-impl Default for Ctx {
-    fn default() -> Self {
+impl Ctx {
+    pub fn new(id: NodeId, program: Program) -> Self {
         let mut ctx = Self {
+            id,
+            program,
+            imports: Default::default(),
             counter: Default::default(),
             errors: Default::default(),
             map: Default::default(),
@@ -62,7 +78,11 @@ impl Default for Ctx {
             ("div".to_string(), sig),
         ]);
 
-        ctx.extend_type_sigs(Some(TypeDecl::unit()));
+        #[allow(clippy::let_unit_value)]
+        {
+            let cons = TypeDecl::unit().infer(&mut ctx);
+            let _ = cons.infer(&mut ctx);
+        }
 
         ctx
     }
@@ -121,12 +141,16 @@ impl Ctx {
 
     /// Looks up a type variable name in the context.
     pub fn lookup(&self, name: &str) -> Option<Rc<TypeScheme>> {
-        self.map.get(name).cloned().or_else(|| {
-            self.signatures.values.get(name).map(|decl| match decl {
-                DeclSignature::Function(fun) => fun.entire_type.clone(),
-                DeclSignature::Constructor(decl) => decl.typ.clone(),
+        self.map
+            .get(name)
+            .cloned()
+            .or_else(|| {
+                self.signatures.values.get(name).map(|decl| match decl {
+                    DeclSignature::Function(fun) => fun.entire_type.clone(),
+                    DeclSignature::Constructor(decl) => decl.typ.clone(),
+                })
             })
-        })
+            .or_else(|| self.lookup_on_imports(name, |ctx| ctx.lookup(name)))
     }
 
     pub fn lookup_cons(&self, name: &str) -> Option<Rc<ConstructorSignature>> {
@@ -137,10 +161,36 @@ impl Ctx {
                 DeclSignature::Function(_) => None,
                 DeclSignature::Constructor(cons) => Some(cons.clone()),
             })
+            .or_else(|| self.lookup_on_imports(name, |ctx| ctx.lookup_cons(name)))
     }
 
-    pub fn lookup_type(&self, name: &str) -> Option<&TypeSignature> {
-        self.signatures.types.get(name)
+    pub fn lookup_type(&self, name: &str) -> Option<TypeSignature> {
+        self.signatures
+            .types
+            .get(name)
+            .cloned()
+            .or_else(|| self.lookup_on_imports(name, |ctx| ctx.lookup_type(name)))
+    }
+
+    fn lookup_on_imports<T>(&self, name: &str, lookup: impl Fn(&Self) -> Option<T>) -> Option<T> {
+        for (id, import) in self.imports.borrow().iter() {
+            match import {
+                Imports::Items(items) => {
+                    if items.iter().any(|i| name.eq(i.as_str())) {
+                        return lookup(&self.get_ctx_by_id(id));
+                    };
+                }
+                Imports::Star => return lookup(&self.get_ctx_by_id(id)),
+                Imports::Module => {}
+            }
+        }
+        None
+    }
+
+    fn get_ctx_by_id(&self, id: &NodeId) -> Self {
+        self.program.borrow().modules[id]
+            .clone()
+            .expect("ICE: context was not stored in the program")
     }
 
     pub fn error(&self, msg: String) {
@@ -177,14 +227,8 @@ impl Ctx {
             .push(Error::new_dyn(msg, self.location));
     }
 
-    pub fn take_errors(&self) -> Option<Vec<Error>> {
-        let is_not_empty = { !self.errors.borrow().is_empty() };
-
-        is_not_empty.then_some({
-            let mut result = vec![];
-            result.append(&mut self.errors.borrow_mut());
-            result
-        })
+    pub fn take_errors(&self) -> Vec<Error> {
+        std::mem::take(&mut self.errors.borrow_mut())
     }
 
     pub fn err_count(&self) -> usize {
@@ -194,6 +238,62 @@ impl Ctx {
     /// Creates a new hole type.
     pub fn new_hole(&self) -> Type {
         MonoType::new_hole(self.new_name(), self.level)
+    }
+
+    pub fn register_imports(&mut self, ctx: &Self, item: Option<Located<String>>) {
+        let imports = match item {
+            None => Imports::Module,
+
+            Some(item) if item.data.eq("*") => Imports::Star,
+
+            Some(item) if item.data.starts_with(|c: char| c.is_ascii_uppercase()) => {
+                let mut names = Vec::new();
+
+                match ctx.lookup_type(&item.data) {
+                    Some(sig) => {
+                        names.push(sig.name);
+                        for name in sig.names {
+                            names.push(name);
+                        }
+                    }
+
+                    None => {
+                        self.set_position(item.location);
+                        self.error(format!("could not find Type `{}` import", item));
+                        return;
+                    }
+                }
+
+                Imports::Items(names)
+            }
+
+            Some(item) => Imports::Items(vec![item.data]),
+        };
+
+        self.update_imports(ctx.id, imports);
+    }
+
+    pub fn update_imports(&self, id: NodeId, update: Imports) {
+        let mut imports = self.imports.borrow_mut();
+        use Imports::*;
+
+        match imports.get_mut(&id) {
+            None => _ = imports.insert(id, update),
+
+            Some(current) => match (current, update) {
+                (Star, Star) => {}
+                (Star, Items(_)) => {}
+                (Module, Module) => {}
+
+                (Star, Module) => todo!(),
+                (Module, Star) => todo!(),
+                (Module, Items(_)) => todo!(),
+                (Items(_), Module) => todo!(),
+
+                (Items(_), Star) => _ = imports.insert(id, Star),
+                (Items(ref mut items), Items(names)) => items.extend(names),
+            },
+        }
     }
 }
 

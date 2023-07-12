@@ -23,11 +23,33 @@ Sep<U, T>: (Vec<T>, bool) = {
 
 BlockList<U, T>: Vec<T> = "{" <Sep<U, T>> "}"  => <>.0;
 
+Path: (Vec<Located<String>>, Located<String>) = {
+    <s:Loc<UpperId>> <e:("::" <Loc<LowerId>>)> => {
+        (vec![s], e)
+    },
+
+    <s:Loc<UpperId>> <mut v:("::" <Loc<UpperId>>)+> <e:("::" <Loc<LowerId>>)?> => match e {
+        Some(e) => {
+            let mut res = vec![s];
+            res.extend(v);
+            (res, e)
+        }
+
+        None => {
+            let e = v.pop().unwrap();
+            let mut res = vec![s];
+            res.extend(v);
+            (res, e)
+        }
+    },
+};
+
 // O: From<AtomKind<O>>
 AtomItem<I, O> : O = {
     "_" => AtomKind::Wildcard.into(),
     Num => AtomKind::Number(<>).into(),
     Id  => AtomKind::Identifier(<>).into(),
+    Path => AtomKind::Path(Qualifier(<>.0), <>.1).into(),
     "(" <mut sep:Sep<",", I>> ")" => {
         let (mut vec, trailing) = sep;
 
@@ -193,9 +215,18 @@ Param: (Pattern, TypeNode) = "(" <Pattern> <TypeAnotation> ")" => (<>);
 
 FnDecl: FnDecl = "fn" <Loc<LowerId>> <Param*> <TypeAnotation?> <BlockExpr> => FnDecl::new(<>);
 
+UsePath: (Vec<Located<String>>, Option<Located<String>>) = {
+    <a:(<Loc<UpperId>> "::")+> <b:Loc<Id>> => (a, Some(b)),
+    <a:(<Loc<UpperId>> "::")+> <b:Loc<"*">> => (a, Some(b.map(|star| star.to_string()))),
+    <Loc<UpperId>> => (vec![<>], None)
+};
+
+UseDecl: UseDecl = "use" <UsePath> => UseDecl(Qualifier(<>.0), <>.1);
+
 TopLevelKind: TopLevelKind = {
     FnDecl   => TopLevelKind::FnDecl(<>), 
-    TypeDecl => TopLevelKind::TypeDecl(<>), 
+    TypeDecl => TopLevelKind::TypeDecl(<>),
+    UseDecl  => TopLevelKind::UseDecl(<>),
 }
 
 TopLevel: TopLevel = Loc<TopLevelKind>;

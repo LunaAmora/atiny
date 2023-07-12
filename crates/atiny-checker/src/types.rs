@@ -426,6 +426,7 @@ pub struct TypeSignature {
     pub name: String,
     pub params: Vec<String>,
     pub value: TypeValue,
+    pub names: Vec<String>,
 }
 
 impl TypeSignature {
@@ -441,6 +442,7 @@ impl TypeSignature {
             name,
             params: Vec::new(),
             value: TypeValue::Opaque,
+            names: Vec::new(),
         }
     }
 
@@ -454,13 +456,6 @@ impl TypeSignature {
             ),
             TypeValue::Opaque => None,
             TypeValue::Product(_) => todo!(),
-        }
-    }
-
-    pub fn get_product(&self) -> Option<&[(String, Type)]> {
-        match &self.value {
-            TypeValue::Product(prod) => Some(prod),
-            _ => None,
         }
     }
 }

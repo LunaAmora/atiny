@@ -78,6 +78,7 @@ version = "0.1.0"
 dependencies = [
  "atiny-error",
  "atiny-location",
+ "atiny-parser",
  "atiny-tree",
  "im-rc",
  "itertools",

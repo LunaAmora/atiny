@@ -1,11 +1,14 @@
 #![feature(test)]
 extern crate test;
-use std::fs::{self, read_to_string, DirEntry};
+use std::{
+    fs::{self, read_to_string, DirEntry},
+    path::PathBuf,
+};
 use test::{TestDesc, TestDescAndFn, TestName};
 
 pub struct Test {
     pub directory: &'static str,
-    pub run: fn(source: String, file_name: String) -> String,
+    pub run: fn(file_name: PathBuf) -> String,
 }
 
 pub fn split_name(file: &DirEntry) -> (String, String) {
@@ -35,7 +38,7 @@ pub fn test_runner(tests: &[&Test]) {
 
         for file in directory {
             if let Ok(file) = file {
-                let (mut file_name, typ) = split_name(&file);
+                let (file_name, typ) = split_name(&file);
 
                 if typ != "at" {
                     continue;
@@ -60,16 +63,12 @@ pub fn test_runner(tests: &[&Test]) {
                         testfn: test::TestFn::DynTestFn(Box::new(move || {
                             println!("testing '{}'", file_name);
 
-                            let content = read_to_string(file.path()).unwrap();
+                            let path = file.path();
 
-                            let mut path = file.path();
-                            path.pop();
+                            let expect_path = path.with_extension("expect");
+                            let result = function(path.with_extension("at"));
 
-                            let path = path.join(format!("{}.{}", file_name, "expect"));
-                            file_name.push_str(".at");
-                            let result = function(content, file_name);
-
-                            if let Ok(expects) = read_to_string(path.clone()) {
+                            if let Ok(expects) = read_to_string(expect_path.clone()) {
                                 if expects.eq(&result) {
                                     Ok(())
                                 } else {
@@ -77,7 +76,7 @@ pub fn test_runner(tests: &[&Test]) {
                                     Err("Mismatch".to_string())
                                 }
                             } else {
-                                fs::write(path, result).map_err(|err| err.to_string())
+                                fs::write(expect_path, result).map_err(|err| err.to_string())
                             }
                         })),
                     });

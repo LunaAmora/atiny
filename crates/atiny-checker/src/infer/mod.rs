@@ -2,6 +2,7 @@
 //! The main construction of this module is the [Infer] trait.
 
 pub mod expr;
+pub mod module;
 pub mod pat;
 pub mod top_level;
 pub mod typ;
@@ -20,5 +21,15 @@ pub trait Infer {
     type Return;
 
     /// Infers the type of an expression.
+    #[must_use]
     fn infer(self, ctx: Self::Context<'_>) -> Self::Return;
+}
+
+impl<T: Infer> Infer for Option<T> {
+    type Context<'a> = T::Context<'a>;
+    type Return = Option<T::Return>;
+
+    fn infer(self, ctx: Self::Context<'_>) -> Self::Return {
+        self.map(|s| s.infer(ctx))
+    }
 }

@@ -9,6 +9,7 @@ edition = "2021"
 atiny-location = {path = "../atiny-location" }
 atiny-tree = {path = "../atiny-tree" }
 atiny-error = {path = "../atiny-error" }
+atiny-parser = {path = "../atiny-parser" }
 im-rc = "15.1.0"
 itertools = "0.10.5"
 

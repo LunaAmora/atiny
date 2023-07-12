@@ -7,6 +7,17 @@ use std::fmt::{self, Display};
 use atiny_location::{Byte, ByteRange, Located};
 use itertools::Itertools;
 
+use crate::SeqHelper;
+
+#[derive(Debug, Clone)]
+pub struct Qualifier(pub Vec<Located<String>>);
+
+impl Display for Qualifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.iter().join("::"))
+    }
+}
+
 /// Primary expressions that are used both for [Pattern] and [Expr].
 #[derive(Debug, Clone)]
 pub enum AtomKind<T> {
@@ -14,6 +25,7 @@ pub enum AtomKind<T> {
     Number(u64),
     Tuple(Vec<T>),
     Identifier(String),
+    Path(Qualifier, Located<String>),
 }
 
 impl<T> AtomKind<T> {
@@ -29,6 +41,7 @@ impl<T: Display> Display for AtomKind<T> {
             Self::Number(n) => write!(f, "{n}"),
             Self::Tuple(t) => write!(f, "({})", t.iter().join(", ")),
             Self::Identifier(id) => write!(f, "{id}"),
+            Self::Path(q, s) => write!(f, "{q}.{s}"),
         }
     }
 }
@@ -422,9 +435,62 @@ impl Display for FnDecl {
 }
 
 #[derive(Debug)]
+pub struct UseDecl(pub Qualifier, pub Option<Located<String>>);
+
+impl Display for UseDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)?;
+        if let Some(a) = &self.1 {
+            write!(f, ".{}", a)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub enum TopLevelKind {
     TypeDecl(TypeDecl),
     FnDecl(FnDecl),
+    UseDecl(UseDecl),
+}
+
+impl SeqHelper<TopLevel> for TypeDecl {
+    fn is_variant(enumerator: &TopLevel) -> bool {
+        matches!(enumerator.data, TopLevelKind::TypeDecl(_))
+    }
+
+    fn get_variant(enumerator: TopLevel) -> Option<Self> {
+        match enumerator.data {
+            TopLevelKind::TypeDecl(d) => Some(d),
+            _ => None,
+        }
+    }
+}
+
+impl SeqHelper<TopLevel> for FnDecl {
+    fn is_variant(enumerator: &TopLevel) -> bool {
+        matches!(enumerator.data, TopLevelKind::FnDecl(_))
+    }
+
+    fn get_variant(enumerator: TopLevel) -> Option<Self> {
+        match enumerator.data {
+            TopLevelKind::FnDecl(d) => Some(d),
+            _ => None,
+        }
+    }
+}
+
+impl SeqHelper<TopLevel> for UseDecl {
+    fn is_variant(enumerator: &TopLevel) -> bool {
+        matches!(enumerator.data, TopLevelKind::UseDecl(_))
+    }
+
+    fn get_variant(enumerator: TopLevel) -> Option<Self> {
+        match enumerator.data {
+            TopLevelKind::UseDecl(d) => Some(d),
+            _ => None,
+        }
+    }
 }
 
 /// It's a declaration on the top level of the program. It can be a function definition, a type
@@ -436,6 +502,7 @@ impl Display for TopLevelKind {
         match self {
             Self::TypeDecl(td) => write!(f, "{}", td),
             Self::FnDecl(fd) => write!(f, "{}", fd),
+            Self::UseDecl(ud) => write!(f, "{}", ud),
         }
     }
 }

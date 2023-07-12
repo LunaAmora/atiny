@@ -4,7 +4,7 @@ use super::Infer;
 use crate::check::Check;
 use crate::context::{Ctx, InferError};
 use crate::exhaustive::Problem;
-use crate::types::{MonoType, Type, TypeScheme, TypeSignature};
+use crate::types::{MonoType, Type, TypeScheme, TypeSignature, TypeValue};
 use crate::unify::unify;
 
 use atiny_error::SugestionKind;
@@ -51,6 +51,8 @@ impl Infer for &Expr {
 
                     None => ctx.new_error(format!("unbound variable '{}'", x)),
                 },
+
+                Path(_, _) => todo!(),
             },
 
             Application(fun, arg) => {
@@ -174,7 +176,8 @@ impl Infer for &Expr {
                     ctx.set_position(expr.location);
                     let typ = ctx.lookup_type(name).unwrap();
 
-                    let Some((record, ret_type)) = ctx.inst_sig_as_record(typ, name.to_owned())
+                    let Some((record, ret_type)) =
+                        ctx.inst_sig_as_record(typ.clone(), name.to_owned())
                     else {
                         return ctx.new_error(format!("the type '{typ}' is not a record"));
                     };
@@ -311,7 +314,7 @@ impl InferError<(Type, Elaborated)> for Ctx {
 }
 
 impl Infer for &[ExprField] {
-    type Context<'a> = (Ctx, RecordInfo<'a>, bool);
+    type Context<'a> = (Ctx, RecordInfo, bool);
     type Return = Vec<(Symbol, Elaborated)>;
 
     fn infer(self, ctx: Self::Context<'_>) -> Self::Return {
@@ -363,41 +366,42 @@ impl Infer for &[ExprField] {
     }
 }
 
-pub struct RecordInfo<'a> {
+pub struct RecordInfo {
     id: String,
-    fields: &'a [(String, Type)],
-    params: &'a [String],
+    fields: Vec<(String, Type)>,
+    params: Vec<String>,
     vars: Vec<Type>,
 }
 
 impl Ctx {
-    fn as_record_info(&self, expr_ty: &Type) -> Option<(RecordInfo<'_>, Type)> {
+    fn as_record_info(&self, expr_ty: &Type) -> Option<(RecordInfo, Type)> {
         expr_ty.get_constructor().and_then(|name| {
             self.lookup_type(&name)
                 .and_then(|typ| self.inst_sig_as_record(typ, name))
         })
     }
 
-    fn inst_sig_as_record<'a>(
-        &'a self,
-        sig: &'a TypeSignature,
-        id: String,
-    ) -> Option<(RecordInfo<'_>, Type)> {
-        sig.get_product().map(|fields| {
-            let (ret_type, vars) = TypeScheme {
-                names: sig.params.clone(),
-                mono: sig.application(),
-            }
-            .instantiate(self.clone());
+    fn inst_sig_as_record(&self, sig: TypeSignature, id: String) -> Option<(RecordInfo, Type)> {
+        let mono = sig.application();
+        let TypeSignature { params, value, .. } = sig;
 
-            let record = RecordInfo {
-                id,
-                fields,
-                params: sig.params.as_slice(),
-                vars,
-            };
+        let TypeValue::Product(fields) = value else {
+            return None;
+        };
 
-            (record, ret_type)
-        })
+        let (ret_type, vars) = TypeScheme {
+            names: params.clone(),
+            mono,
+        }
+        .instantiate(self.clone());
+
+        let record = RecordInfo {
+            id,
+            fields,
+            params,
+            vars,
+        };
+
+        Some((record, ret_type))
     }
 }

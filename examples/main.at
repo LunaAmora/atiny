@@ -1,0 +1,22 @@
+use Lib::List
+use Lib::Bool
+use Lib::OtherThing
+
+type Something = {
+    value: List Bool
+}
+
+fn main (other: OtherThing): (OtherThing, Something, (List Bool)) {
+    let b = other.other;
+    (other, b, b.value)
+}
+
+fn main2 : (OtherThing, Something, (List Bool)){
+    let other = OtherThing {
+        other = Something {
+            value = Cons False Nil
+        }
+    };
+
+    main other
+}

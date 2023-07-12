@@ -1,0 +1,19 @@
+use Main::Something
+use Main::main
+
+type List t = | Cons t (List t) | Nil
+type Bool   = | True | False
+
+type OtherThing = {
+    other: Something
+}
+
+fn lib_main : (OtherThing, Something, (List Bool)) {
+    let arg = OtherThing {
+        other = Something {
+            value = Cons False Nil
+        }
+    };
+
+    main arg
+}
